@@ -8,12 +8,13 @@ const ordersRouter  = require('./routes/orders');
 const reportsRouter = require('./routes/reports');
 const authRouter    = require('./routes/auth');
 const usersRouter   = require('./routes/users');
-const { initSocket } = require('./socket/orderEvents');
+const { initSocket }      = require('./socket/orderEvents');
+const { startScheduler }  = require('./jobs/scheduler');
+const { sendDailyReport } = require('./jobs/dailyReport');
 
 const app    = express();
 const server = http.createServer(app);
 
-// Socket.io — real-time updates to all clients
 const io = new Server(server, {
   cors: {
     origin: process.env.FRONTEND_URL || '*',
@@ -21,11 +22,8 @@ const io = new Server(server, {
   }
 });
 
-// Middleware
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json());
-
-// Make io available to route handlers
 app.set('io', io);
 
 // Routes
@@ -37,15 +35,26 @@ app.use('/api/reports', reportsRouter);
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
 
-// Socket.io connection handling
+// Test report endpoint — sends today's report on demand (admin use only)
+app.post('/api/reports/send-test', async (req, res) => {
+  try {
+    const { date } = req.body; // optional: "2026-05-20"
+    const result = await sendDailyReport(date || undefined);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('Test report error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 initSocket(io);
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`🍔 Fergburger server running on port ${PORT}`);
+  startScheduler();
 });
 
-// Auto-run schema on startup
 async function initDB() {
   try {
     const pool = require('./db/pool');
